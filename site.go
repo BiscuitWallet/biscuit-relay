@@ -47,6 +47,9 @@ func staticSite(dir string) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
+		// Browsers may keep files but must ask again each time (a cheap
+		// "not modified" when nothing changed): site updates show at once.
+		h.Set("Cache-Control", "no-cache")
 		h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 		if r.TLS != nil {
 			h.Set("Strict-Transport-Security", "max-age=31536000")

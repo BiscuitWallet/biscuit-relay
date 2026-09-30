@@ -103,9 +103,14 @@ func serve(args []string) {
 	go every(time.Minute, func() { limiter.Sweep(time.Now()) })
 
 	health := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
-	var site http.Handler
+	var site, data http.Handler
 	if *siteDir != "" {
 		site = staticSite(*siteDir)
+		feeds := DefaultFeeds()
+		for _, f := range feeds {
+			go f.Run(client)
+		}
+		data = feedsHandler(feeds)
 	}
 
 	// Go's server logs TLS and connection errors with the client's IP: discard
@@ -131,6 +136,7 @@ func serve(args []string) {
 		mux.Handle("/health", health)
 		if site != nil {
 			mux.Handle("/", site)
+			mux.Handle("/data/", data)
 		}
 		log.Printf("dev mode: http://%s", *dev)
 		log.Fatal(newServer(*dev, mux).ListenAndServe())
@@ -152,7 +158,7 @@ func serve(args []string) {
 		// Port 80: Let's Encrypt challenges, everything else redirected to HTTPS.
 		log.Fatal(newServer(":80", m.HTTPHandler(nil)).ListenAndServe())
 	}()
-	srv := newServer(":443", routes(*domain, relay, health, *siteDomain, site))
+	srv := newServer(":443", routes(*domain, relay, health, *siteDomain, site, data))
 	srv.TLSConfig = m.TLSConfig()
 	srv.TLSConfig.MinVersion = tls.VersionTLS12
 	log.Printf("serving https://%s", strings.Join(hosts, ", https://"))

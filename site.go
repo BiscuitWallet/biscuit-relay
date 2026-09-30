@@ -16,13 +16,17 @@ import (
 // static website on siteHost with www.siteHost redirected to it. Anything else
 // (unknown host, relay paths on the site, site paths on the relay) is a 404.
 // Serving both from one program keeps the user's real IP reaching the relay
-// directly, with no reverse proxy in between.
-func routes(relayHost string, relay, health http.Handler, siteHost string, site http.Handler) *http.ServeMux {
+// directly, with no reverse proxy in between. The public data cache (feeds.go)
+// is under /data/ on siteHost.
+func routes(relayHost string, relay, health http.Handler, siteHost string, site, data http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle(relayHost+"/api/", relay)
 	mux.Handle(relayHost+"/health", health)
 	if siteHost != "" {
 		mux.Handle(siteHost+"/", site)
+		if data != nil {
+			mux.Handle(siteHost+"/data/", data)
+		}
 		mux.HandleFunc("www."+siteHost+"/", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "https://"+siteHost+r.URL.RequestURI(), http.StatusMovedPermanently)
 		})

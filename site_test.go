@@ -4,12 +4,14 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestSite(t *testing.T) *http.ServeMux {
@@ -32,7 +34,7 @@ func newTestSite(t *testing.T) *http.ServeMux {
 	stub := func(body string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) })
 	}
-	return routes("relay.example.org", stub("api"), stub("ok"), "example.org", staticSite(dir))
+	return routes("relay.example.org", stub("api"), stub("ok"), "example.org", staticSite(dir), nil)
 }
 
 func get(mux *http.ServeMux, method, url string) *httptest.ResponseRecorder {
@@ -91,5 +93,59 @@ func TestSiteIsReadOnlyWithSecurityHeaders(t *testing.T) {
 		if rec.Header().Get(h) == "" {
 			t.Errorf("missing %s", h)
 		}
+	}
+}
+
+func TestFeeds(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/list":
+			io.WriteString(w, `[{"symbol":"xmr","current_price":300}]`)
+		case "/empty":
+			io.WriteString(w, `[]`)
+		case "/html":
+			io.WriteString(w, `<html>`)
+		default:
+			http.Error(w, "down", http.StatusBadGateway)
+		}
+	}))
+	defer upstream.Close()
+
+	crypto := &Feed{Name: "crypto", URL: upstream.URL + "/list", WantList: true}
+	fiat := &Feed{Name: "fiat", URL: upstream.URL + "/down"}
+	mux := routes("relay.example.org", http.NotFoundHandler(), http.NotFoundHandler(), "example.org", http.NotFoundHandler(), feedsHandler([]*Feed{crypto, fiat}))
+
+	if rec := get(mux, "GET", "https://example.org/data/crypto.json"); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("before the first fetch: %d", rec.Code)
+	}
+	ctx := context.Background()
+	if err := crypto.Refresh(ctx, upstream.Client(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rec := get(mux, "GET", "https://example.org/data/crypto.json")
+	if rec.Code != 200 || rec.Body.String() != `[{"symbol":"xmr","current_price":300}]` || rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("crypto: %d %q", rec.Code, rec.Body.String())
+	}
+	// Bad upstream answers keep the previous copy.
+	for _, path := range []string{"/empty", "/html", "/down"} {
+		crypto.URL = upstream.URL + path
+		if err := crypto.Refresh(ctx, upstream.Client(), time.Now()); err == nil {
+			t.Fatalf("%s: accepted", path)
+		}
+	}
+	if rec := get(mux, "GET", "https://example.org/data/crypto.json"); rec.Body.String() != `[{"symbol":"xmr","current_price":300}]` {
+		t.Fatalf("previous copy lost: %q", rec.Body.String())
+	}
+	if err := fiat.Refresh(ctx, upstream.Client(), time.Now()); err == nil {
+		t.Fatal("fiat: HTTP error accepted")
+	}
+	if rec := get(mux, "POST", "https://example.org/data/crypto.json"); rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST: %d", rec.Code)
+	}
+	if rec := get(mux, "GET", "https://example.org/data/other.json"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown feed: %d", rec.Code)
+	}
+	if rec := get(mux, "GET", "https://relay.example.org/data/crypto.json"); rec.Code != http.StatusNotFound {
+		t.Fatalf("feeds on the relay host: %d", rec.Code)
 	}
 }

@@ -34,9 +34,27 @@ func routes(relayHost string, relay, health http.Handler, siteHost string, site,
 	return mux
 }
 
+// dataRoutes is the public data cache plus the Tor check, under /data/.
+func dataRoutes(feeds, torCheck http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/data/", feeds)
+	mux.Handle("/data/tor-check", torCheck)
+	return mux
+}
+
+// onionRoutes is what the onion service serves: the website and /data/, any
+// Host. Nothing else exists there, the relay above all.
+func onionRoutes(site, data http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/", site)
+	mux.Handle("/data/", data)
+	return mux
+}
+
 // staticSite serves the files in dir: no directory listings, no dotfiles,
-// GET and HEAD only, and no logging of any kind.
-func staticSite(dir string) http.Handler {
+// GET and HEAD only, and no logging of any kind. With onionAddress, pages
+// served over HTTPS tell Tor Browser about the onion service.
+func staticSite(dir, onionAddress string) http.Handler {
 	files := http.FileServer(noListing{http.Dir(dir)})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -53,6 +71,9 @@ func staticSite(dir string) http.Handler {
 		h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 		if r.TLS != nil {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
+			if onionAddress != "" {
+				h.Set("Onion-Location", "http://"+onionAddress+r.URL.RequestURI())
+			}
 		}
 		files.ServeHTTP(w, r)
 	})

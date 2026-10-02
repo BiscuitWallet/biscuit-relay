@@ -34,7 +34,7 @@ func newTestSite(t *testing.T) *http.ServeMux {
 	stub := func(body string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) })
 	}
-	return routes("relay.example.org", stub("api"), stub("ok"), "example.org", staticSite(dir), nil)
+	return routes("relay.example.org", stub("api"), stub("ok"), "example.org", staticSite(dir, ""), nil)
 }
 
 func get(mux *http.ServeMux, method, url string) *httptest.ResponseRecorder {
@@ -147,5 +147,56 @@ func TestFeeds(t *testing.T) {
 	}
 	if rec := get(mux, "GET", "https://relay.example.org/data/crypto.json"); rec.Code != http.StatusNotFound {
 		t.Fatalf("feeds on the relay host: %d", rec.Code)
+	}
+}
+
+func TestOnionServesNoRelay(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("home"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data := dataRoutes(http.NotFoundHandler(), torCheckHandler(testTorExits(), true))
+	onion := onionRoutes(staticSite(dir, ""), data)
+	for _, target := range []string{
+		"http://abc.onion/api/new_trade?id=R1",
+		"http://abc.onion/api/coins",
+		"http://relay.example.org/api/new_trade?id=R1",
+		"http://abc.onion/health",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", target, nil)
+		req.RemoteAddr = "127.0.0.1:5555"
+		onion.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s on the onion: %d %q", target, rec.Code, rec.Body.String())
+		}
+	}
+	rec := httptest.NewRecorder()
+	onion.ServeHTTP(rec, httptest.NewRequest("GET", "http://abc.onion/", nil))
+	if rec.Code != 200 || rec.Body.String() != "home" {
+		t.Errorf("site on the onion: %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	onion.ServeHTTP(rec, httptest.NewRequest("GET", "http://abc.onion/data/tor-check", nil))
+	if rec.Body.String() != "{\"tor\":\"yes\"}\n" {
+		t.Errorf("tor-check on the onion: %q", rec.Body.String())
+	}
+}
+
+func TestOnionLocationOnlyOverHTTPS(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("home"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	site := staticSite(dir, "abc.onion")
+	rec := httptest.NewRecorder()
+	site.ServeHTTP(rec, httptest.NewRequest("GET", "https://example.org/download/", nil))
+	if got := rec.Header().Get("Onion-Location"); got != "http://abc.onion/download/" {
+		t.Errorf("Onion-Location = %q", got)
+	}
+	rec = httptest.NewRecorder()
+	site.ServeHTTP(rec, httptest.NewRequest("GET", "http://abc.onion/", nil))
+	if rec.Header().Get("Onion-Location") != "" {
+		t.Error("Onion-Location sent on the onion itself")
 	}
 }

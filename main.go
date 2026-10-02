@@ -59,6 +59,9 @@ func serve(args []string) {
 	retentionDays := fs.Int("retention-days", 365, "days a trade record is kept")
 	siteDomain := fs.String("site-domain", "", "also serve the static website on this domain (www. redirects to it)")
 	siteDir := fs.String("site-dir", "", "directory holding the static website")
+	tradesPerDay := fs.Int("trades-per-day", 100, "trades one address (IPv6: one /64) may create per day")
+	onionListen := fs.String("onion-listen", "", "also serve the website, without the relay, on this local address for the Tor onion service (e.g. 127.0.0.1:8081)")
+	onionAddress := fs.String("onion-address", "", "the onion service's address (xxx.onion), announced to Tor Browser with Onion-Location")
 	fs.Parse(args)
 
 	if (*domain == "") == (*dev == "") {
@@ -69,6 +72,12 @@ func serve(args []string) {
 	}
 	if *siteDomain != "" && *siteDir == "" {
 		log.Fatal("-site-domain needs -site-dir")
+	}
+	if *onionListen != "" && *siteDir == "" {
+		log.Fatal("-onion-listen needs -site-dir")
+	}
+	if *onionAddress != "" && (*onionListen == "" || !strings.HasSuffix(*onionAddress, ".onion")) {
+		log.Fatal("-onion-address needs -onion-listen and must end in .onion")
 	}
 	keyBytes, err := os.ReadFile(*keyFile)
 	if err != nil {
@@ -88,10 +97,10 @@ func serve(args []string) {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	trades := &TradeLog{Dir: *logDir, Recipient: rcpt, Retention: time.Duration(*retentionDays) * 24 * time.Hour}
-	tor := &TorExits{URL: TorBulkExitList, Client: client}
+	tor := NewTorExits(client)
 	// Generous: many users can share one VPN server IP (the app itself sends at
 	// most 6 requests per minute). Only abuse of the relay is stopped.
-	limiter := &Limiter{PerMinute: 120, TradesPerWindow: 20, TradeWindow: 10 * time.Minute}
+	limiter := &Limiter{PerMinute: 120, TradesPerWindow: 20, TradeWindow: 10 * time.Minute, TradesPerDay: *tradesPerDay}
 	relay := &Relay{Upstream: *upstream, APIKey: apiKey, Client: client, Trades: trades, Tor: tor, Limiter: limiter, Now: time.Now}
 
 	go refreshTorExits(tor)
@@ -103,14 +112,15 @@ func serve(args []string) {
 	go every(time.Minute, func() { limiter.Sweep(time.Now()) })
 
 	health := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
-	var site, data http.Handler
+	var site, data, onionMux http.Handler
 	if *siteDir != "" {
-		site = staticSite(*siteDir)
+		site = staticSite(*siteDir, *onionAddress)
 		feeds := DefaultFeeds()
 		for _, f := range feeds {
 			go f.Run(client)
 		}
-		data = feedsHandler(feeds)
+		data = dataRoutes(feedsHandler(feeds), torCheckHandler(tor, false))
+		onionMux = onionRoutes(staticSite(*siteDir, ""), dataRoutes(feedsHandler(feeds), torCheckHandler(tor, true)))
 	}
 
 	// Go's server logs TLS and connection errors with the client's IP: discard
@@ -127,6 +137,16 @@ func serve(args []string) {
 			IdleTimeout:       60 * time.Second,
 			MaxHeaderBytes:    16 << 10,
 		}
+	}
+
+	if *onionListen != "" {
+		// The onion service: Tor connects from this machine, so every request
+		// comes from 127.0.0.1. The relay is not mounted here at all; trade
+		// creation through Tor stays impossible whatever the address says.
+		go func() {
+			log.Printf("onion service backend: http://%s", *onionListen)
+			log.Fatal(newServer(*onionListen, onionMux).ListenAndServe())
+		}()
 	}
 
 	if *dev != "" {
@@ -165,23 +185,18 @@ func serve(args []string) {
 	log.Fatal(srv.ListenAndServeTLS("", ""))
 }
 
-// refreshTorExits retries every minute until the first load, then refreshes
-// every 30 minutes.
+// refreshTorExits refreshes the lists every 30 minutes, and retries a failed
+// refresh after 2 minutes. A list older than a day blocks trade creation.
 func refreshTorExits(tor *TorExits) {
-	loaded := false
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		err := tor.Refresh(ctx)
 		cancel()
 		if err != nil {
 			log.Printf("tor exit list: %v", err)
+			time.Sleep(2 * time.Minute)
 		} else {
-			loaded = true
-		}
-		if loaded {
 			time.Sleep(30 * time.Minute)
-		} else {
-			time.Sleep(time.Minute)
 		}
 	}
 }

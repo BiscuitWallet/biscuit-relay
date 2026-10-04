@@ -181,3 +181,22 @@ Trocador transmet les demandes par email depuis une adresse **@trocador.app**.
 - Trocador répond `{"error": "Invalid API key"}` (HTTP 404) quand la clé est refusée ;
   la réponse est transmise telle quelle.
 - User agent et langue envoyés par l'app : ce sont eux qui sont journalisés.
+
+## Service onion (site seulement)
+
+Le site est aussi servi en `.onion` : `biscuit6qpejzxfr7us7oibhjasvrozfeno7xonffzzoj4lmw6o3kbyd.onion`
+(adresse choisie avec mkp224o ; clé privée sur le VPS dans `/var/lib/tor/biscuit_site/`
+et sauvegardée hors du VPS). Tor (paquet Debian) transmet le port 80 de l'onion à
+`127.0.0.1:8081`, où le relais ne sert que le site et `/data/` : jamais `/api/` ni
+`/health`, puisque via l'onion toutes les requêtes arrivent de 127.0.0.1.
+
+`/etc/tor/torrc` :
+
+```
+SocksPort 0
+HiddenServiceDir /var/lib/tor/biscuit_site/
+HiddenServicePort 80 127.0.0.1:8081
+```
+
+Le relais : `-onion-listen 127.0.0.1:8081 -onion-address <adresse>.onion` (le site en
+HTTPS envoie alors l'en-tête `Onion-Location` à Tor Browser).

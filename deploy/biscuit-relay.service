@@ -9,6 +9,8 @@ ExecStart=/usr/local/bin/biscuit-relay serve \
     -domain relay.biscuitwallet.com \
     -site-domain biscuitwallet.com \
     -site-dir /srv/biscuit-site \
+    -onion-listen 127.0.0.1:8081 \
+    -onion-address biscuit6qpejzxfr7us7oibhjasvrozfeno7xonffzzoj4lmw6o3kbyd.onion \
     -key-file %d/trocador-key \
     -recipient age1REPLACE_WITH_PUBLIC_KEY \
     -log-dir /var/lib/biscuit-relay/trades \

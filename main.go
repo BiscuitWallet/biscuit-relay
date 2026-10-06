@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -175,8 +176,16 @@ func serve(args []string) {
 		Cache:      autocert.DirCache(*certDir),
 	}
 	go func() {
-		// Port 80: Let's Encrypt challenges, everything else redirected to HTTPS.
-		log.Fatal(newServer(":80", m.HTTPHandler(nil)).ListenAndServe())
+		// Port 80: Let's Encrypt challenges, everything else redirected to HTTPS,
+		// permanently (301), as search engines expect.
+		toHTTPS := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host, _, err := net.SplitHostPort(r.Host)
+			if err != nil {
+				host = r.Host
+			}
+			http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusMovedPermanently)
+		})
+		log.Fatal(newServer(":80", m.HTTPHandler(toHTTPS)).ListenAndServe())
 	}()
 	srv := newServer(":443", routes(*domain, relay, health, *siteDomain, site, data))
 	srv.TLSConfig = m.TLSConfig()

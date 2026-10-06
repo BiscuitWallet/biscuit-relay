@@ -4,12 +4,14 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -198,5 +200,80 @@ func TestOnionLocationOnlyOverHTTPS(t *testing.T) {
 	site.ServeHTTP(rec, httptest.NewRequest("GET", "http://abc.onion/", nil))
 	if rec.Header().Get("Onion-Location") != "" {
 		t.Error("Onion-Location sent on the onion itself")
+	}
+}
+
+func newPlainSite(t *testing.T, files map[string]string) http.Handler {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return staticSite(dir, "")
+}
+
+func TestSiteNotFoundPage(t *testing.T) {
+	site := newPlainSite(t, map[string]string{"index.html": "home", "404/index.html": "lost bear", ".git/config": "secret"})
+	for _, url := range []string{"/nope/", "/missing.png", "/.git/config"} {
+		rec := httptest.NewRecorder()
+		site.ServeHTTP(rec, httptest.NewRequest("GET", url, nil))
+		if rec.Code != 404 || rec.Body.String() != "lost bear" {
+			t.Errorf("%s: %d %q, want the 404 page", url, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestSiteSecurityTxt(t *testing.T) {
+	site := newPlainSite(t, map[string]string{"index.html": "home", ".well-known/security.txt": "Contact: mailto:x@example.org", ".well-known/other": "no"})
+	rec := httptest.NewRecorder()
+	site.ServeHTTP(rec, httptest.NewRequest("GET", "/.well-known/security.txt", nil))
+	if rec.Code != 200 || rec.Body.String() != "Contact: mailto:x@example.org" {
+		t.Errorf("security.txt: %d %q", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	site.ServeHTTP(rec, httptest.NewRequest("GET", "/.well-known/other", nil))
+	if rec.Code != 404 {
+		t.Errorf("other dotfile: %d, want 404", rec.Code)
+	}
+}
+
+func TestSiteGzip(t *testing.T) {
+	page := strings.Repeat("<p>Biscuit</p>", 200)
+	site := newPlainSite(t, map[string]string{"index.html": page, "img.png": "\x89PNG"})
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip, br")
+	rec := httptest.NewRecorder()
+	site.ServeHTTP(rec, req)
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("page not gzipped: %v", rec.Header())
+	}
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(zr)
+	if string(body) != page {
+		t.Error("gzipped page differs")
+	}
+
+	req = httptest.NewRequest("GET", "/img.png", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec = httptest.NewRecorder()
+	site.ServeHTTP(rec, req)
+	if rec.Header().Get("Content-Encoding") != "" || rec.Body.String() != "\x89PNG" {
+		t.Error("image should be sent as it is")
+	}
+
+	rec = httptest.NewRecorder()
+	site.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Header().Get("Content-Encoding") != "" || rec.Body.String() != page {
+		t.Error("no gzip without Accept-Encoding")
 	}
 }

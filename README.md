@@ -1,202 +1,138 @@
-# Relais Trocador de Biscuit
+# biscuit-relay
 
-Petit serveur qui garde la clé partenaire Trocador hors de l'application. Biscuit
-appelle le relais, le relais ajoute la clé et transmet la demande à Trocador.
+The server behind [biscuitwallet.com](https://biscuitwallet.com): one small Go program
+that serves the website and its onion service, the public price data the app reads,
+and the relay for exchange swaps through [Trocador](https://trocador.app).
 
-## Ce qu'il fait, et rien d'autre
+It is published so that anyone can read what our server does with the requests of
+[Biscuit Wallet](https://github.com/BiscuitWallet/Biscuit). What it records, why and for
+how long is also explained in the [privacy policy](https://biscuitwallet.com/privacy/).
+A server can't be inspected from the outside: this is the code we run, built as
+described below.
 
-- **Liste blanche** : seuls `coins`, `new_rate`, `new_trade`, `trade` et
-  `validateaddress` passent, en GET. Tout le reste reçoit une 404.
-- **Rien sur l'utilisateur vers Trocador** : Trocador ne reçoit que la clé et un
-  user agent fixe (`biscuit-relay`). Ni IP, ni cookies, ni en-têtes de l'app.
-- **Journal des échanges** : à chaque `new_trade` réussi, et seulement là, une ligne
-  est écrite : date, IP, user agent, langue, ID de l'échange. C'est ce qu'exigent
-  Trocador et ses fournisseurs pour les demandes des autorités.
-  - Chaque ligne est **chiffrée avec une clé publique** ([age](https://age-encryption.org)).
-    Le serveur ne peut pas la relire : seule la clé privée, gardée hors ligne, le peut.
-  - Un fichier par jour (`AAAA-MM-JJ.log`), supprimé automatiquement après
-    **12 mois** (vérification toutes les heures).
-  - Si l'écriture échoue, l'app ne reçoit pas l'adresse de dépôt : pas d'échange
-    sans trace.
-- **Pas d'échange via Tor** : la création d'échange est refusée (403, `tor_exit`)
-  depuis les sorties Tor, d'après la liste officielle du Tor Project, rechargée
-  toutes les 30 minutes. Tant que la liste n'a jamais pu être chargée, la création
-  d'échange est refusée (503). Taux et suivi restent possibles.
-- **VPN acceptés** : seules les sorties Tor sont refusées. Beaucoup d'utilisateurs
-  peuvent partager l'IP d'un même serveur VPN, d'où des limites larges : 120 requêtes
-  par minute et 20 créations d'échange par 10 minutes par IP (l'app elle-même ne
-  dépasse pas 6 requêtes par minute). Compteurs en mémoire uniquement, oubliés à la
-  fin de chaque fenêtre.
-- **Aucun autre journal** : les erreurs de connexion de Go (qui contiennent l'IP) sont
-  jetées ; le programme n'écrit que ses propres erreurs, sans IP ni requête.
-- **HTTPS intégré** : certificat Let's Encrypt obtenu et renouvelé tout seul. Pas de
-  Caddy ni de nginx.
-- `GET /health` répond `ok`, pour une surveillance externe.
+## The exchange swap relay
 
-## Tester sur le Mac
+Biscuit calls the relay; the relay adds our Trocador partner key and passes the request
+on. The key never ships inside the app.
+
+- **Allow list**: only `coins`, `new_rate`, `new_trade`, `trade` and `validateaddress`
+  go through, with GET. Everything else gets a 404.
+- **Nothing about the user goes to Trocador**: Trocador receives the key and a fixed
+  user agent (`biscuit-relay`). No IP address, cookies or headers from the app.
+- **Swap log**: when a `new_trade` succeeds, and only then, one line is written: time,
+  IP address, user agent, languages and swap ID. Trocador and its exchanges require
+  it, to answer requests from authorities.
+  - Each line is **encrypted with a public key** ([age](https://age-encryption.org)).
+    The server cannot read it back: only the private key, kept offline, can.
+  - One file per day (`YYYY-MM-DD.log`), deleted automatically after **12 months**
+    (checked every hour).
+  - If the line can't be written, the app doesn't receive the deposit address: no swap
+    without its record.
+- **No swaps through Tor**: creating a swap is refused (403, `tor_exit`) from Tor exits,
+  according to two lists from the Tor Project (the bulk exit list and Onionoo, IPv6
+  included), reloaded every 30 minutes. While either list is missing or more than a
+  day old, swap creation is refused (503). Rates and swap status still work.
+- **VPNs are fine**: only Tor exits are refused. Many people can share one VPN server's
+  address, hence generous limits: 120 requests a minute and 20 swap creations per
+  10 minutes per address (the app itself stays under 6 requests a minute), and a daily
+  cap of swap creations per address (`-trades-per-day`, 100 by default). IPv6 addresses
+  are counted per /64. Counters live in memory only and are forgotten at the end of
+  each window.
+- **No other log**: Go's connection errors (which contain the IP address) are dropped;
+  the program only writes its own errors, without addresses or requests.
+
+## The website and its data
+
+- **Static site** on the main domain (`-site-domain`, `-site-dir`), `www.` redirected to
+  it, GET and HEAD only, no directory listings, no hidden files, **no access log**. The
+  relay only answers on `relay.` (`/api/`, `/health`). No reverse proxy: the client's
+  address reaches the program directly, and goes nowhere else.
+- **Public data under `/data/`**: the server itself fetches prices (CoinGecko), currency
+  rates (the European Central Bank, through Frankfurter) and Monero's crowdfunding
+  proposals, and serves the same copy to everyone, so those sources never see users.
+  A bad answer from a source keeps the previous copy.
+- `/data/tor-check` answers `yes`, `no` or `unknown`: whether the request came through
+  Tor. Never the address, never logged.
+- **Onion service** (`-onion-listen`, `-onion-address`): the website and `/data/` only,
+  on a local address that Tor forwards to. The relay is not mounted there, since every
+  request through the onion comes from 127.0.0.1. Over HTTPS, the site sends the
+  `Onion-Location` header to Tor Browser.
+- **HTTPS built in**: Let's Encrypt certificates, obtained and renewed by the program.
+- `GET /health` answers `ok`, for an external uptime check.
+
+## Build and test
 
 ```sh
-brew install go
-cd relay
 go test ./...
 go build -o biscuit-relay .
-./biscuit-relay keygen -out /tmp/test-identity.txt      # affiche la clé publique age1...
-./biscuit-relay serve -dev 127.0.0.1:8080 -key-file <fichier avec la clé Trocador> \
+./biscuit-relay keygen -out /tmp/test-identity.txt    # prints the public key age1...
+./biscuit-relay serve -dev 127.0.0.1:8080 -key-file <file with a Trocador key> \
     -recipient age1... -log-dir /tmp/relay-trades
 curl 'http://127.0.0.1:8080/api/coins'
 ```
 
-## Mise en service (Debian 12 ou 13, environ 30 minutes)
+For the server: `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o biscuit-relay-linux .`
 
-### 1. Clés (sur le Mac)
+## Running it (Debian 12 or 13)
 
-```sh
-./biscuit-relay keygen -out trades-identity.txt
-```
+1. **Keys, on your own computer**: `./biscuit-relay keygen -out trades-identity.txt`.
+   This file is the **private key** of the swap log: it never goes on the server. Keep
+   it offline. Without it the log can't be read, not even to answer a legal request.
+   The `age1...` line it prints is the public key, for the service.
+2. **Server**: a small VPS in the EU or EEA (1 vCPU and 1 GB of memory are enough).
+   **Turn off the host's backups and snapshots**: they would copy the swap log outside
+   its 12-month rotation. Automatic security updates, SSH by key only, and a firewall
+   that only lets in SSH, 80 (certificates) and 443.
+3. **Program and Trocador key**: copy the binary to `/usr/local/bin/biscuit-relay` and
+   [`deploy/biscuit-relay.service`](deploy/biscuit-relay.service) to
+   `/etc/systemd/system/`. Type the key without leaving it in the shell history:
 
-- `trades-identity.txt` est la **clé privée** du journal. Elle ne va **jamais** sur le
-  serveur. La garder dans le gestionnaire de mots de passe et sur une clé USB.
-  Sans elle, le journal est illisible, y compris pour répondre à une demande légale.
-- La ligne `age1...` affichée est la clé publique, à mettre dans le service (étape 4).
+   ```sh
+   install -d -m 700 /etc/biscuit-relay
+   read -rs K && printf '%s\n' "$K" > /etc/biscuit-relay/trocador-key && unset K
+   chmod 600 /etc/biscuit-relay/trocador-key
+   ```
 
-### 2. Serveur
+4. **Service**: set the domains and the `age1...` public key in the service file, then
+   `systemctl daemon-reload && systemctl enable --now biscuit-relay`. It runs as a
+   dynamic user in a locked-down sandbox, and only the service can read the key.
+5. **Onion service** (optional), in `/etc/tor/torrc`:
 
-1. Louer le plus petit VPS Debian (1 vCPU, 1 Go de RAM suffit) chez un hébergeur de
-   l'UE ou de l'EEE. **Désactiver les sauvegardes et instantanés** de l'hébergeur :
-   ils copieraient le journal hors de la rotation de 12 mois.
-2. Pointer le domaine vers le serveur : enregistrement `A` (et `AAAA` si IPv6).
-3. En SSH (connexion par clé) :
+   ```
+   SocksPort 0
+   HiddenServiceDir /var/lib/tor/biscuit_site/
+   HiddenServicePort 80 127.0.0.1:8081
+   ```
 
-```sh
-apt update && apt full-upgrade -y
-apt install -y unattended-upgrades nftables
-dpkg-reconfigure -plow unattended-upgrades          # répondre Oui
+If the relay goes down, only exchange swaps stop: the wallet and atomic swaps carry on.
 
-# SSH par clé uniquement
-sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-systemctl reload ssh
+## Answering a legal request
 
-# Pare-feu : SSH, 80 (certificat) et 443 seulement
-cat > /etc/nftables.conf <<'EOF'
-#!/usr/sbin/nft -f
-flush ruleset
-table inet filter {
-  chain input {
-    type filter hook input priority 0; policy drop;
-    iif lo accept
-    ct state established,related accept
-    meta l4proto { icmp, ipv6-icmp } accept
-    tcp dport { 22, 80, 443 } accept
-  }
-}
-EOF
-systemctl enable --now nftables
-```
+Trocador forwards requests by email from an **@trocador.app** address.
 
-### 3. Programme et clé Trocador
+1. **Check where it comes from**: an email can be forged. Write back to the known
+   Trocador address yourself (not with Reply), or check the DKIM signature.
+2. Copy the days concerned from `/var/lib/private/biscuit-relay/trades/` to the offline
+   computer that holds the private key.
+3. Decrypt there and find the swap:
+   `./biscuit-relay decrypt -identity trades-identity.txt 2026-09-26.log | grep <swap ID>`
+4. Send **only** the line of the swap asked about, then delete the local copies.
 
-Sur le Mac :
+## The app's side of the contract
 
-```sh
-cd relay
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o biscuit-relay-linux .
-scp biscuit-relay-linux root@SERVEUR:/usr/local/bin/biscuit-relay
-scp deploy/biscuit-relay.service root@SERVEUR:/etc/systemd/system/
-```
+- Same paths and parameters as `https://trocador.app/api/`, without the `API-Key` header.
+- Relay errors are JSON: `{"error": code, "message": text}`. The code `tor_exit` (403)
+  is **not** a refused key: the app shows it without turning swaps off.
+- Trocador answers `{"error": "Invalid API key"}` (HTTP 404) when the key is refused;
+  that answer is passed on as it is.
+- The user agent and languages the app sends are what gets logged.
 
-(`GOARCH=arm64` si le VPS est en ARM.)
+## Contributing
 
-Sur le serveur, la clé Trocador (tapée, jamais dans l'historique du shell) :
+Biscuit is made by a small team: we don't take pull requests and can't answer
+questions on GitHub. To report a vulnerability, see
+[SECURITY.md](https://github.com/BiscuitWallet/Biscuit/blob/main/SECURITY.md).
 
-```sh
-chmod 755 /usr/local/bin/biscuit-relay
-install -d -m 700 /etc/biscuit-relay
-read -rs K && printf '%s\n' "$K" > /etc/biscuit-relay/trocador-key && unset K
-chmod 600 /etc/biscuit-relay/trocador-key
-```
+## License
 
-### 4. Service
-
-Dans `/etc/systemd/system/biscuit-relay.service`, vérifier les domaines et remplacer
-`age1REPLACE_WITH_PUBLIC_KEY` par la clé publique, puis :
-
-```sh
-systemctl daemon-reload
-systemctl enable --now biscuit-relay
-journalctl -u biscuit-relay -f        # doit afficher "serving https://..."
-```
-
-Depuis le Mac : `curl https://DOMAINE/health` doit répondre `ok`.
-
-### Site web (même programme)
-
-Le relais sert aussi le site statique : `-site-domain biscuitwallet.com -site-dir
-/srv/biscuit-site`. Le relais répond seulement sur `relay.` (`/api/`, `/health`), le
-site sur le domaine principal, `www.` redirige vers le domaine principal, tout le
-reste répond 404. Pas de proxy inverse : l'IP réelle arrive directement au relais, et
-le site n'enregistre rien (aucun journal d'accès). Pas de listes de dossiers ni de
-fichiers cachés (`.git`…), GET/HEAD seulement. Enregistrements DNS `A` pour
-`relay`, `@` et `www`. Le certificat de chaque nom est obtenu à la première visite.
-
-Mettre en ligne le site depuis le Mac (fichiers lisibles par tous, le service tourne
-sous un utilisateur dynamique) :
-
-```sh
-rsync -a --delete --chmod=D755,F644 site/ root@SERVEUR:/srv/biscuit-site/
-```
-
-### 5. Surveillance
-
-Un service externe de vérification de disponibilité qui appelle
-`https://DOMAINE/health` toutes les 5 minutes et envoie un email en cas de panne.
-Si le relais tombe, seuls les échanges Trocador s'arrêtent ; le wallet et les swaps
-atomiques continuent.
-
-## Entretien
-
-- **Mettre à jour le programme** : recompiler, `scp`, puis
-  `systemctl restart biscuit-relay`.
-- **Changer la clé Trocador** : réécrire `/etc/biscuit-relay/trocador-key` comme à
-  l'étape 3, puis `systemctl restart biscuit-relay`. Aucune mise à jour de l'app.
-- Le système se met à jour tout seul ; redémarrer le serveur de temps en temps
-  (`reboot`) pour les mises à jour du noyau.
-
-## Répondre à une demande légale
-
-Trocador transmet les demandes par email depuis une adresse **@trocador.app**.
-
-1. **Vérifier l'origine** : un email peut être falsifié. Répondre en écrivant soi-même
-   à l'adresse Trocador connue (pas via « Répondre »), ou vérifier la signature DKIM.
-2. Copier les jours concernés sur le Mac :
-   `scp root@SERVEUR:/var/lib/private/biscuit-relay/trades/2026-09-26.log .`
-3. Déchiffrer hors ligne et chercher l'échange :
-   `./biscuit-relay decrypt -identity trades-identity.txt 2026-09-26.log | grep ID_ECHANGE`
-4. Envoyer **uniquement** la ligne de l'échange demandé, puis effacer les copies locales.
-
-## Contrat avec l'app
-
-- Même chemins et paramètres que `https://trocador.app/api/`, sans en-tête `API-Key`.
-- Erreurs du relais : JSON `{"error": code, "message": texte}`. Le code `tor_exit`
-  (403) n'est **pas** une clé refusée : l'app doit l'afficher sans couper les swaps.
-- Trocador répond `{"error": "Invalid API key"}` (HTTP 404) quand la clé est refusée ;
-  la réponse est transmise telle quelle.
-- User agent et langue envoyés par l'app : ce sont eux qui sont journalisés.
-
-## Service onion (site seulement)
-
-Le site est aussi servi en `.onion` : `biscuit6qpejzxfr7us7oibhjasvrozfeno7xonffzzoj4lmw6o3kbyd.onion`
-(adresse choisie avec mkp224o ; clé privée sur le VPS dans `/var/lib/tor/biscuit_site/`
-et sauvegardée hors du VPS). Tor (paquet Debian) transmet le port 80 de l'onion à
-`127.0.0.1:8081`, où le relais ne sert que le site et `/data/` : jamais `/api/` ni
-`/health`, puisque via l'onion toutes les requêtes arrivent de 127.0.0.1.
-
-`/etc/tor/torrc` :
-
-```
-SocksPort 0
-HiddenServiceDir /var/lib/tor/biscuit_site/
-HiddenServicePort 80 127.0.0.1:8081
-```
-
-Le relais : `-onion-listen 127.0.0.1:8081 -onion-address <adresse>.onion` (le site en
-HTTPS envoie alors l'en-tête `Onion-Location` à Tor Browser).
+BSD 3-Clause, see [LICENSE](LICENSE).

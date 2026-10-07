@@ -129,8 +129,10 @@ Trocador forwards requests by email from an **@trocador.app** address.
 
 ## Contributing
 
-Biscuit is made by a small team: we don't take pull requests and can't answer
-questions on GitHub. To report a vulnerability, see
+Pull requests are welcome, especially small and focused ones: bug fixes, documentation.
+We're a small team, so we can't promise when we'll review them, and for anything bigger
+please write to us first at [biscuitwallet@tutamail.com](mailto:biscuitwallet@tutamail.com).
+To report a vulnerability, see
 [SECURITY.md](https://github.com/BiscuitWallet/Biscuit/blob/main/SECURITY.md).
 
 ## License

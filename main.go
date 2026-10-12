@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // SPDX-FileCopyrightText: The Biscuit developers
 
-// biscuit-relay keeps Biscuit's Trocador partner key on the server and records
+// biscuit-relay keeps Biscuit's partner keys on the server (Trocador, and the
+// exchanges under /api/x/, see exchanges.go). For Trocador, it records
 // the connection data Trocador's providers require for each created trade.
 //
 //	biscuit-relay serve   -domain relay.example.org -key-file ... -recipient age1... [-site-domain example.org -site-dir /srv/site]
@@ -63,6 +64,9 @@ func serve(args []string) {
 	tradesPerDay := fs.Int("trades-per-day", 100, "trades one address (IPv6: one /64) may create per day")
 	onionListen := fs.String("onion-listen", "", "also serve the website, without the relay, on this local address for the Tor onion service (e.g. 127.0.0.1:8081)")
 	onionAddress := fs.String("onion-address", "", "the onion service's address (xxx.onion), announced to Tor Browser with Onion-Location")
+	pegasusPublic := fs.String("pegasus-public-key-file", "", "file holding the PegasusSwap public key (enables /api/x/)")
+	pegasusSecret := fs.String("pegasus-secret-file", "", "file holding the PegasusSwap secret")
+	pegasusURL := fs.String("pegasus-url", "https://api.pegasusswap.com/api/private/", "PegasusSwap API base URL")
 	fs.Parse(args)
 
 	if (*domain == "") == (*dev == "") {
@@ -104,6 +108,23 @@ func serve(args []string) {
 	limiter := &Limiter{PerMinute: 120, TradesPerWindow: 20, TradeWindow: 10 * time.Minute, TradesPerDay: *tradesPerDay}
 	relay := &Relay{Upstream: *upstream, APIKey: apiKey, Client: client, Trades: trades, Tor: tor, Limiter: limiter, Now: time.Now}
 
+	// Biscuit's own exchanges, which accept Tor. On the onion every request
+	// comes from 127.0.0.1: one shared, larger budget there.
+	var exchangeList []Exchange
+	if *pegasusPublic != "" || *pegasusSecret != "" {
+		exchangeList = append(exchangeList, &Pegasus{BaseURL: *pegasusURL, PublicKey: readSecret(*pegasusPublic),
+			Secret: readSecret(*pegasusSecret), Client: client})
+	}
+	var exchanges, onionExchanges http.Handler
+	if len(exchangeList) > 0 {
+		clearLimiter := &Limiter{PerMinute: 120, TradesPerWindow: 20, TradeWindow: 10 * time.Minute, TradesPerDay: *tradesPerDay}
+		onionLimiter := &Limiter{PerMinute: 600, TradesPerWindow: 60, TradeWindow: 10 * time.Minute, TradesPerDay: 10 * *tradesPerDay}
+		exchanges = &Exchanges{List: exchangeList, Now: time.Now, Limiter: clearLimiter}
+		onionExchanges = &Exchanges{List: exchangeList, Now: time.Now, Limiter: onionLimiter}
+		go every(time.Minute, func() { clearLimiter.Sweep(time.Now()); onionLimiter.Sweep(time.Now()) })
+		log.Printf("exchanges: %d under /api/x/", len(exchangeList))
+	}
+
 	go refreshTorExits(tor)
 	go every(time.Hour, func() {
 		if _, err := trades.Purge(time.Now()); err != nil {
@@ -121,7 +142,7 @@ func serve(args []string) {
 			go f.Run(client)
 		}
 		data = dataRoutes(feedsHandler(feeds), torCheckHandler(tor, false))
-		onionMux = onionRoutes(staticSite(*siteDir, ""), dataRoutes(feedsHandler(feeds), torCheckHandler(tor, true)))
+		onionMux = onionRoutes(staticSite(*siteDir, ""), dataRoutes(feedsHandler(feeds), torCheckHandler(tor, true)), onionExchanges)
 	}
 
 	// Go's server logs TLS and connection errors with the client's IP: discard
@@ -142,8 +163,9 @@ func serve(args []string) {
 
 	if *onionListen != "" {
 		// The onion service: Tor connects from this machine, so every request
-		// comes from 127.0.0.1. The relay is not mounted here at all; trade
-		// creation through Tor stays impossible whatever the address says.
+		// comes from 127.0.0.1. The Trocador relay is not mounted here at all;
+		// its trade creation through Tor stays impossible whatever the address
+		// says. Only /api/x/ is, whose exchanges accept Tor.
 		go func() {
 			log.Printf("onion service backend: http://%s", *onionListen)
 			log.Fatal(newServer(*onionListen, onionMux).ListenAndServe())
@@ -154,6 +176,9 @@ func serve(args []string) {
 		// Any host: the relay under /api/ and /health, the site everywhere else.
 		mux := http.NewServeMux()
 		mux.Handle("/api/", relay)
+		if exchanges != nil {
+			mux.Handle("/api/x/", exchanges)
+		}
 		mux.Handle("/health", health)
 		if site != nil {
 			mux.Handle("/", site)
@@ -187,7 +212,7 @@ func serve(args []string) {
 		})
 		log.Fatal(newServer(":80", m.HTTPHandler(toHTTPS)).ListenAndServe())
 	}()
-	srv := newServer(":443", routes(*domain, relay, health, *siteDomain, site, data))
+	srv := newServer(":443", routes(*domain, relay, exchanges, health, *siteDomain, site, data))
 	srv.TLSConfig = m.TLSConfig()
 	srv.TLSConfig.MinVersion = tls.VersionTLS12
 	log.Printf("serving https://%s", strings.Join(hosts, ", https://"))
@@ -208,6 +233,19 @@ func refreshTorExits(tor *TorExits) {
 			time.Sleep(30 * time.Minute)
 		}
 	}
+}
+
+// readSecret reads a one-line key file; a missing or empty file is fatal.
+func readSecret(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("reading key file: %v", err)
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		log.Fatalf("key file %s is empty", path)
+	}
+	return s
 }
 
 func every(d time.Duration, f func()) {

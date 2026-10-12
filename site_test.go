@@ -36,7 +36,7 @@ func newTestSite(t *testing.T) *http.ServeMux {
 	stub := func(body string) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) })
 	}
-	return routes("relay.example.org", stub("api"), stub("ok"), "example.org", staticSite(dir, ""), nil)
+	return routes("relay.example.org", stub("api"), nil, stub("ok"), "example.org", staticSite(dir, ""), nil)
 }
 
 func get(mux *http.ServeMux, method, url string) *httptest.ResponseRecorder {
@@ -115,7 +115,7 @@ func TestFeeds(t *testing.T) {
 
 	crypto := &Feed{Name: "crypto", URL: upstream.URL + "/list", WantList: true}
 	fiat := &Feed{Name: "fiat", URL: upstream.URL + "/down"}
-	mux := routes("relay.example.org", http.NotFoundHandler(), http.NotFoundHandler(), "example.org", http.NotFoundHandler(), feedsHandler([]*Feed{crypto, fiat}))
+	mux := routes("relay.example.org", http.NotFoundHandler(), nil, http.NotFoundHandler(), "example.org", http.NotFoundHandler(), feedsHandler([]*Feed{crypto, fiat}))
 
 	if rec := get(mux, "GET", "https://example.org/data/crypto.json"); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("before the first fetch: %d", rec.Code)
@@ -158,7 +158,7 @@ func TestOnionServesNoRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := dataRoutes(http.NotFoundHandler(), torCheckHandler(testTorExits(), true))
-	onion := onionRoutes(staticSite(dir, ""), data)
+	onion := onionRoutes(staticSite(dir, ""), data, nil)
 	for _, target := range []string{
 		"http://abc.onion/api/new_trade?id=R1",
 		"http://abc.onion/api/coins",

@@ -19,10 +19,14 @@ import (
 // (unknown host, relay paths on the site, site paths on the relay) is a 404.
 // Serving both from one program keeps the user's real IP reaching the relay
 // directly, with no reverse proxy in between. The public data cache (feeds.go)
-// is under /data/ on siteHost.
-func routes(relayHost string, relay, health http.Handler, siteHost string, site, data http.Handler) *http.ServeMux {
+// is under /data/ on siteHost. Biscuit's own exchanges (exchanges.go) are
+// under /api/x/ on relayHost, when configured.
+func routes(relayHost string, relay, exchanges, health http.Handler, siteHost string, site, data http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle(relayHost+"/api/", relay)
+	if exchanges != nil {
+		mux.Handle(relayHost+"/api/x/", exchanges)
+	}
 	mux.Handle(relayHost+"/health", health)
 	if siteHost != "" {
 		mux.Handle(siteHost+"/", site)
@@ -44,12 +48,16 @@ func dataRoutes(feeds, torCheck http.Handler) http.Handler {
 	return mux
 }
 
-// onionRoutes is what the onion service serves: the website and /data/, any
-// Host. Nothing else exists there, the relay above all.
-func onionRoutes(site, data http.Handler) http.Handler {
+// onionRoutes is what the onion service serves: the website, /data/ and, when
+// configured, Biscuit's own exchanges under /api/x/ (they accept Tor), any
+// Host. The Trocador relay never exists there.
+func onionRoutes(site, data, exchanges http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/", site)
 	mux.Handle("/data/", data)
+	if exchanges != nil {
+		mux.Handle("/api/x/", exchanges)
+	}
 	return mux
 }
 

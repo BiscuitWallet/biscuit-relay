@@ -12,11 +12,15 @@ ExecStart=/usr/local/bin/biscuit-relay serve \
     -onion-listen 127.0.0.1:8081 \
     -onion-address biscuit6qpejzxfr7us7oibhjasvrozfeno7xonffzzoj4lmw6o3kbyd.onion \
     -key-file %d/trocador-key \
+    -pegasus-public-key-file %d/pegasus-public-key \
+    -pegasus-secret-file %d/pegasus-secret \
     -recipient age1REPLACE_WITH_PUBLIC_KEY \
     -log-dir /var/lib/biscuit-relay/trades \
     -cert-dir /var/lib/biscuit-relay/certs
-# The Trocador key is handed to the service only, never readable by other users.
+# The partner keys are handed to the service only, never readable by other users.
 LoadCredential=trocador-key:/etc/biscuit-relay/trocador-key
+LoadCredential=pegasus-public-key:/etc/biscuit-relay/pegasus-public-key
+LoadCredential=pegasus-secret:/etc/biscuit-relay/pegasus-secret
 Restart=always
 RestartSec=5
 

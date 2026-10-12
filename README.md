@@ -2,7 +2,8 @@
 
 The server behind [biscuitwallet.com](https://biscuitwallet.com): one small Go program
 that serves the website and its onion service, the public price data the app reads,
-and the relay for exchange swaps through [Trocador](https://trocador.app).
+the relay for exchange swaps through [Trocador](https://trocador.app), and Biscuit's own
+exchanges, which work over Tor.
 
 It is published so that anyone can read what our server does with the requests of
 [Biscuit Wallet](https://github.com/BiscuitWallet/Biscuit). What it records, why and for
@@ -60,6 +61,28 @@ on. The key never ships inside the app.
 - **HTTPS built in**: Let's Encrypt certificates, obtained and renewed by the program.
 - `GET /health` answers `ok`, for an external uptime check.
 
+## Biscuit's own exchanges (`/api/x/`)
+
+Trocador refuses swaps created through Tor, so Biscuit also calls a few exchanges
+itself: exchanges that **never ask for KYC** and **accept Tor**. Starting with
+[PegasusSwap](https://pegasusswap.com). The app uses them in Tor mode, through the onion
+service, and next to Trocador otherwise.
+
+- **Routes**, GET only: `assets`, `quotes`, `new_trade`, `trade`. The relay asks every
+  exchange for a quote, the app ranks them with Trocador's, by what the user receives.
+- **Keys stay here**: each exchange's partner key is read from a file at start
+  (`-pegasus-public-key-file`, `-pegasus-secret-file`). Without keys, `/api/x/` is off.
+- **Tor welcome**: no Tor exit check, and the routes also exist on the onion service.
+- **No log at all**: no IP address, no swap record. The exchanges receive the swap
+  itself (coins, amount, addresses) and a fixed user agent, nothing about the user.
+- **Status needs the payout address**: `trade` answers only when the request gives
+  the address the coins go to, so a short swap ID is not enough to read someone's
+  addresses.
+- Same limits per address as the Trocador relay; on the onion, where every request
+  comes from 127.0.0.1, one larger shared budget.
+- Amounts are cut to each coin's decimals: rounded up for what the user sends, down
+  for what they get.
+
 ## Build and test
 
 ```sh
@@ -93,6 +116,17 @@ For the server: `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldfla
    chmod 600 /etc/biscuit-relay/trocador-key
    ```
 
+   The same way, PegasusSwap's public key and secret, for `/api/x/` (optional):
+
+   ```sh
+   read -rs K && printf '%s\n' "$K" > /etc/biscuit-relay/pegasus-public-key && unset K
+   read -rs K && printf '%s\n' "$K" > /etc/biscuit-relay/pegasus-secret && unset K
+   chmod 600 /etc/biscuit-relay/pegasus-*
+   ```
+
+   Without them, drop the two `-pegasus-*` lines and their `LoadCredential` lines from
+   the service file.
+
 4. **Service**: set the domains and the `age1...` public key in the service file, then
    `systemctl daemon-reload && systemctl enable --now biscuit-relay`. It runs as a
    dynamic user in a locked-down sandbox, and only the service can read the key.
@@ -105,6 +139,7 @@ For the server: `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldfla
    ```
 
 If the relay goes down, only exchange swaps stop: the wallet and atomic swaps carry on.
+The onion service also serves `/api/x/`, for the app in Tor mode.
 
 ## Answering a legal request
 
@@ -126,6 +161,10 @@ Trocador forwards requests by email from an **@trocador.app** address.
 - Trocador answers `{"error": "Invalid API key"}` (HTTP 404) when the key is refused;
   that answer is passed on as it is.
 - The user agent and languages the app sends are what gets logged.
+- `/api/x/` has its own answers (see `exchanges.go`): assets as `{ticker, network}`
+  with the app's names, amounts as plain decimal strings, statuses with the app's names
+  (`waiting`, `confirming`, `sending`, `finished`, `failed`, `expired`, `halted`,
+  `refunded`), and swap IDs of the form `<exchange>-<exchange's ID>`.
 
 ## Contributing
 

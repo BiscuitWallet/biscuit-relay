@@ -119,7 +119,7 @@ func TestExchangesQuote(t *testing.T) {
 		t.Errorf("quote %+v", q)
 	}
 	params := f.requests[0].URL.Query()
-	if params.Get("coinFrom") != "BTC" || params.Get("coinTo") != "XMR" || params.Get("lastSource") != "deposit" || params.Get("typeSwap") != "2" {
+	if params.Get("coinFrom") != "BTC" || params.Get("networkFrom") != "BTC" || params.Get("coinTo") != "XMR" || params.Get("lastSource") != "deposit" || params.Get("typeSwap") != "2" {
 		t.Errorf("upstream query %v", params)
 	}
 	if ua := f.requests[0].Header.Get("User-Agent"); ua != "biscuit-relay" {
@@ -203,6 +203,44 @@ func TestExchangesTradeThroughTor(t *testing.T) {
 	} {
 		if rec := xget(x, target, "185.220.101.1"); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "deposit") {
 			t.Errorf("%s: %d %s", target, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestExchangesFixedRateTrade(t *testing.T) {
+	f := newFakePegasus(t)
+	// Fixed: 0.01 BTC received costs 1.57544184 XMR.
+	f.quote = `{"amount":1.57544184,"pair":"XMR_BTC","receive":0.01,"exchangeRate":0.0063474,"maxAmount":1574.8,"minAmount":0.01873736}`
+	x := newTestExchanges(f)
+	rec := xget(x, "/api/x/new_trade?exchange=pegasus&fixed=1&from=xmr&from_network=Mainnet&to=btc&to_network=Mainnet&amount=0.01&address="+
+		testBTCRefund+"&refund="+testXMRAddress, "203.0.113.5")
+	if rec.Code != 200 {
+		t.Fatalf("new_trade %d: %s", rec.Code, rec.Body.String())
+	}
+	q := f.requests[0].URL.Query()
+	if q.Get("lastSource") != "receive" || q.Get("typeSwap") != "1" || q.Get("amount") != "0.01" {
+		t.Errorf("quote before the fixed trade: %v", q)
+	}
+	var sent map[string]any
+	if err := json.Unmarshal([]byte(f.bodies[1]), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent["depositAmount"] != 1.57544184 || sent["lastSource"] != "receive" || sent["typeSwap"] != float64(1) {
+		t.Errorf("fixed trade body %v", sent)
+	}
+}
+
+func TestPegasusTokensOnEthereum(t *testing.T) {
+	f := newFakePegasus(t)
+	x := newTestExchanges(f)
+	xget(x, "/api/x/quotes?from=usdt&from_network=ERC20&to=xmr&to_network=Mainnet&amount=200", "203.0.113.5")
+	if q := f.requests[0].URL.Query(); q.Get("coinFrom") != "USDT" || q.Get("networkFrom") != "ETH" {
+		t.Errorf("USDT query %v", q)
+	}
+	p := &Pegasus{}
+	for _, network := range []string{"ETH", "ERC20", "eth"} {
+		if a, ok := p.asset("USDC", network); !ok || a != (Asset{"usdc", "ERC20"}) {
+			t.Errorf("USDC on %s: %v %v", network, a, ok)
 		}
 	}
 }

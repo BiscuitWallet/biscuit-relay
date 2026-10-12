@@ -30,14 +30,15 @@ type Pegasus struct {
 	Client    *http.Client
 }
 
-// Pegasus coin and network of each wallet asset.
+// Pegasus coin and network of each wallet asset, as get-all-coins lists them
+// (checked 2026-10-12): Ethereum tokens are on the network "ETH".
 var pegasusAssets = map[Asset][2]string{
 	{"xmr", "Mainnet"}: {"XMR", "XMR"},
 	{"btc", "Mainnet"}: {"BTC", "BTC"},
 	{"ltc", "Mainnet"}: {"LTC", "LTC"},
 	{"eth", "ERC20"}:   {"ETH", "ETH"},
-	{"usdt", "ERC20"}:  {"USDT", "ERC20"},
-	{"usdc", "ERC20"}:  {"USDC", "ERC20"},
+	{"usdt", "ERC20"}:  {"USDT", "ETH"},
+	{"usdc", "ERC20"}:  {"USDC", "ETH"},
 }
 
 func (p *Pegasus) ID() string   { return "pegasus" }
@@ -51,7 +52,12 @@ func (p *Pegasus) Supports(a Asset) bool {
 	return ok
 }
 
+// asset reads a swap's coin back. Their docs also show "ERC20" as a network
+// name in swaps: taken as Ethereum.
 func (p *Pegasus) asset(coin, network string) (Asset, bool) {
+	if strings.EqualFold(network, "ERC20") {
+		network = "ETH"
+	}
 	for a, c := range pegasusAssets {
 		if strings.EqualFold(c[0], coin) && strings.EqualFold(c[1], network) {
 			return a, true
@@ -142,8 +148,18 @@ func roundUp(f *big.Float) string {
 
 func (p *Pegasus) Create(ctx context.Context, t TradeRequest) (Trade, error) {
 	from, to := pegasusAssets[t.From], pegasusAssets[t.To]
-	// Fixed rate: the amount given is the one received (lastSource=receive).
-	amount, err := json.Marshal(json.Number(t.Amount))
+	// depositAmount is always what is sent. Fixed rate: t.Amount is what is
+	// received, so a fresh quote says how much to send (lastSource=receive).
+	// To confirm on the first real fixed-rate swap.
+	deposit := t.Amount
+	if t.Fixed {
+		quote, err := p.Quote(ctx, t.QuoteRequest)
+		if err != nil {
+			return Trade{}, err
+		}
+		deposit = roundAmount(quote.AmountFrom, t.From, true)
+	}
+	amount, err := json.Marshal(json.Number(deposit))
 	if err != nil {
 		return Trade{}, err
 	}

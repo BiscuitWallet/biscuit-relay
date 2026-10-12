@@ -67,6 +67,11 @@ func serve(args []string) {
 	pegasusPublic := fs.String("pegasus-public-key-file", "", "file holding the PegasusSwap public key (enables /api/x/)")
 	pegasusSecret := fs.String("pegasus-secret-file", "", "file holding the PegasusSwap secret")
 	pegasusURL := fs.String("pegasus-url", "https://api.pegasusswap.com/api/private/", "PegasusSwap API base URL")
+	etz := fs.Bool("etz", false, "offer ETZ-Swap under /api/x/ (works without keys)")
+	etzPublic := fs.String("etz-public-key-file", "", "file holding the ETZ-Swap public key (affiliate share)")
+	etzSecret := fs.String("etz-secret-file", "", "file holding the ETZ-Swap secret key")
+	etzKeyVersion := fs.String("etz-key-version", "1", "ETZ-Swap key version")
+	etzURL := fs.String("etz-url", "https://api.etz-swap.com/api/v1/deposit/public/", "ETZ-Swap API base URL")
 	fs.Parse(args)
 
 	if (*domain == "") == (*dev == "") {
@@ -114,6 +119,13 @@ func serve(args []string) {
 	if *pegasusPublic != "" || *pegasusSecret != "" {
 		exchangeList = append(exchangeList, &Pegasus{BaseURL: *pegasusURL, PublicKey: readSecret(*pegasusPublic),
 			Secret: readSecret(*pegasusSecret), Client: client})
+	}
+	if *etz {
+		e := &ETZ{BaseURL: *etzURL, KeyVersion: *etzKeyVersion, Client: client}
+		if *etzPublic != "" || *etzSecret != "" {
+			e.PublicKey, e.Secret = readSecret(*etzPublic), readSecret(*etzSecret)
+		}
+		exchangeList = append(exchangeList, e)
 	}
 	var exchanges, onionExchanges http.Handler
 	if len(exchangeList) > 0 {

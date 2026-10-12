@@ -64,14 +64,19 @@ on. The key never ships inside the app.
 ## Biscuit's own exchanges (`/api/x/`)
 
 Trocador refuses swaps created through Tor, so Biscuit also calls a few exchanges
-itself: exchanges that **never ask for KYC** and **accept Tor**. Starting with
-[PegasusSwap](https://pegasusswap.com). The app uses them in Tor mode, through the onion
-service, and next to Trocador otherwise.
+itself: exchanges that **never ask for KYC** and **accept Tor**:
+[PegasusSwap](https://pegasusswap.com) and [ETZ-Swap](https://etz-swap.com). The app uses
+them in Tor mode, through the onion service, and next to Trocador otherwise.
 
 - **Routes**, GET only: `assets`, `quotes`, `new_trade`, `trade`. The relay asks every
   exchange for a quote, the app ranks them with Trocador's, by what the user receives.
 - **Keys stay here**: each exchange's partner key is read from a file at start
-  (`-pegasus-public-key-file`, `-pegasus-secret-file`). Without keys, `/api/x/` is off.
+  (`-pegasus-public-key-file`, `-pegasus-secret-file`; `-etz` with optional
+  `-etz-public-key-file`, `-etz-secret-file`). ETZ-Swap works without keys, they only
+  bring the affiliate share. With no exchange configured, `/api/x/` is off.
+- **ETZ-Swap swaps are private to their creator**: created with ETZ's `secureToken`
+  type. The token is part of the swap ID the app keeps (`etz-<id>.<token>`); the relay
+  stores nothing.
 - **Tor welcome**: no Tor exit check, and the routes also exist on the onion service.
 - **No log at all**: no IP address, no swap record. The exchanges receive the swap
   itself (coins, amount, addresses) and a fixed user agent, nothing about the user.

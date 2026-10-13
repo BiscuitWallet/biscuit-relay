@@ -70,7 +70,7 @@ func serve(args []string) {
 	etz := fs.Bool("etz", false, "offer ETZ-Swap under /api/x/ (works without keys)")
 	etzPublic := fs.String("etz-public-key-file", "", "file holding the ETZ-Swap public key (affiliate share)")
 	etzSecret := fs.String("etz-secret-file", "", "file holding the ETZ-Swap secret key")
-	etzKeyVersion := fs.String("etz-key-version", "1", "ETZ-Swap key version")
+	etzKeyVersion := fs.String("etz-key-version", "1", "ETZ-Swap key version (goes up each time the keys are generated again)")
 	etzURL := fs.String("etz-url", "https://api.etz-swap.com/api/v1/deposit/public/", "ETZ-Swap API base URL")
 	stereoswapKey := fs.String("stereoswap-key-file", "", "file holding the Stereoswap API key (with -stereoswap-referral-file, enables Stereoswap)")
 	stereoswapReferral := fs.String("stereoswap-referral-file", "", "file holding the Stereoswap referral code, required to create swaps")

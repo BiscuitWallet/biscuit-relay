@@ -27,6 +27,7 @@ import (
 var feedCoins = []string{
 	"monero", "bitcoin", "litecoin", "ethereum", "tether", "usd-coin", "bitcoin-cash",
 	"dash", "zcash", "dogecoin", "solana", "ripple", "cardano", "tron", "wownero",
+	"binancecoin", // BNB, swapped to or from a wallet outside Biscuit
 }
 
 func coinGeckoURL() string {

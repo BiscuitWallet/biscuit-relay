@@ -51,10 +51,36 @@ var walletAssets = []struct {
 	{Asset{"usdc", "ERC20"}, "USD Coin", 6},
 }
 
+// Popular coins Biscuit does not hold, as the app lists them: swapped to or
+// from a wallet outside Biscuit. Memo: the address may need a memo or tag.
+var outsideAssets = []struct {
+	Asset
+	Name     string
+	Decimals int
+	Memo     bool
+}{
+	{Asset{"usdt", "TRC20"}, "Tether (Tron)", 6, false},
+	{Asset{"sol", "Mainnet"}, "Solana", 9, false},
+	{Asset{"zec", "Mainnet"}, "Zcash", 8, false},
+	{Asset{"xrp", "Mainnet"}, "XRP", 6, true},
+	{Asset{"trx", "Mainnet"}, "Tron", 6, false},
+	{Asset{"doge", "Mainnet"}, "Dogecoin", 8, false},
+	{Asset{"ada", "Mainnet"}, "Cardano", 6, false},
+	{Asset{"xlm", "Mainnet"}, "Stellar", 7, true},
+	{Asset{"bnb", "BEP20"}, "BNB", 18, false},
+	{Asset{"bch", "Mainnet"}, "Bitcoin Cash", 8, false},
+	{Asset{"usdc", "SOL"}, "USD Coin (Solana)", 6, false},
+}
+
 func decimalsOf(a Asset) int {
 	for _, w := range walletAssets {
 		if w.Asset == a {
 			return w.Decimals
+		}
+	}
+	for _, o := range outsideAssets {
+		if o.Asset == a {
+			return o.Decimals
 		}
 	}
 	return 18
@@ -216,15 +242,22 @@ func (x *Exchanges) assets(w http.ResponseWriter) {
 	type item struct {
 		Asset
 		Name string `json:"name"`
+		Memo bool   `json:"memo"`
 	}
 	list := []item{}
-	for _, a := range walletAssets {
+	add := func(a Asset, name string, memo bool) {
 		for _, e := range x.List {
-			if e.Supports(a.Asset) {
-				list = append(list, item{a.Asset, a.Name})
-				break
+			if e.Supports(a) {
+				list = append(list, item{a, name, memo})
+				return
 			}
 		}
+	}
+	for _, a := range walletAssets {
+		add(a.Asset, a.Name, false)
+	}
+	for _, a := range outsideAssets {
+		add(a.Asset, a.Name, a.Memo)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"assets": list})
 }
@@ -248,6 +281,11 @@ func parseQuoteRequest(q url.Values) (QuoteRequest, string) {
 func knownAsset(a Asset) bool {
 	for _, w := range walletAssets {
 		if w.Asset == a {
+			return true
+		}
+	}
+	for _, o := range outsideAssets {
+		if o.Asset == a {
 			return true
 		}
 	}

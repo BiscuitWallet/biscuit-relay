@@ -30,15 +30,23 @@ type Pegasus struct {
 	Client    *http.Client
 }
 
-// Pegasus coin and network of each wallet asset, as get-all-coins lists them
-// (checked 2026-10-12): Ethereum tokens are on the network "ETH".
+// Pegasus coin and network of each asset, as get-all-coins lists them
+// (checked 2026-10-12, outside coins 2026-10-13): tokens are on the network
+// of their chain, "ETH", "TRX" or "SOL". No ZEC, XRP, XLM, BNB or TON.
 var pegasusAssets = map[Asset][2]string{
-	{"xmr", "Mainnet"}: {"XMR", "XMR"},
-	{"btc", "Mainnet"}: {"BTC", "BTC"},
-	{"ltc", "Mainnet"}: {"LTC", "LTC"},
-	{"eth", "ERC20"}:   {"ETH", "ETH"},
-	{"usdt", "ERC20"}:  {"USDT", "ETH"},
-	{"usdc", "ERC20"}:  {"USDC", "ETH"},
+	{"xmr", "Mainnet"}:  {"XMR", "XMR"},
+	{"btc", "Mainnet"}:  {"BTC", "BTC"},
+	{"ltc", "Mainnet"}:  {"LTC", "LTC"},
+	{"eth", "ERC20"}:    {"ETH", "ETH"},
+	{"usdt", "ERC20"}:   {"USDT", "ETH"},
+	{"usdc", "ERC20"}:   {"USDC", "ETH"},
+	{"usdt", "TRC20"}:   {"USDT", "TRX"},
+	{"sol", "Mainnet"}:  {"SOL", "SOL"},
+	{"trx", "Mainnet"}:  {"TRX", "TRX"},
+	{"doge", "Mainnet"}: {"DOGE", "DOGE"},
+	{"ada", "Mainnet"}:  {"ADA", "ADA"},
+	{"bch", "Mainnet"}:  {"BCH", "BCH"},
+	{"usdc", "SOL"}:     {"USDC", "SOL"},
 }
 
 func (p *Pegasus) ID() string   { return "pegasus" }

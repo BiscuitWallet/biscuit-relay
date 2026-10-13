@@ -30,14 +30,24 @@ type ETZ struct {
 	Client     *http.Client
 }
 
-// ETZ coin and network of each wallet asset (checked 2026-10-12).
+// ETZ coin and network of each asset (checked 2026-10-12, outside coins
+// 2026-10-13 in public/coins). No ZEC, TON or BCH.
 var etzAssets = map[Asset][2]string{
-	{"xmr", "Mainnet"}: {"XMR", "XMR"},
-	{"btc", "Mainnet"}: {"BTC", "BTC"},
-	{"ltc", "Mainnet"}: {"LTC", "LTC"},
-	{"eth", "ERC20"}:   {"ETH", "ETH"},
-	{"usdt", "ERC20"}:  {"USDT", "ETH"},
-	{"usdc", "ERC20"}:  {"USDC", "ETH"},
+	{"xmr", "Mainnet"}:  {"XMR", "XMR"},
+	{"btc", "Mainnet"}:  {"BTC", "BTC"},
+	{"ltc", "Mainnet"}:  {"LTC", "LTC"},
+	{"eth", "ERC20"}:    {"ETH", "ETH"},
+	{"usdt", "ERC20"}:   {"USDT", "ETH"},
+	{"usdc", "ERC20"}:   {"USDC", "ETH"},
+	{"usdt", "TRC20"}:   {"USDT", "TRX"},
+	{"sol", "Mainnet"}:  {"SOL", "SOL"},
+	{"xrp", "Mainnet"}:  {"XRP", "XRP"},
+	{"trx", "Mainnet"}:  {"TRX", "TRX"},
+	{"doge", "Mainnet"}: {"DOGE", "DOGE"},
+	{"ada", "Mainnet"}:  {"ADA", "ADA"},
+	{"xlm", "Mainnet"}:  {"XLM", "XLM"},
+	{"bnb", "BEP20"}:    {"BNB", "BSC"},
+	{"usdc", "SOL"}:     {"USDC", "SOL"},
 }
 
 func (e *ETZ) ID() string      { return "etz" }

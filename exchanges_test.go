@@ -145,7 +145,7 @@ func TestExchangesRejectsBadRequests(t *testing.T) {
 	f := newFakePegasus(t)
 	x := newTestExchanges(f)
 	for _, target := range []string{
-		"/api/x/quotes?from=doge&from_network=Mainnet&to=xmr&to_network=Mainnet&amount=1",
+		"/api/x/quotes?from=pepe&from_network=ERC20&to=xmr&to_network=Mainnet&amount=1",
 		"/api/x/quotes?from=xmr&from_network=Mainnet&to=xmr&to_network=Mainnet&amount=1",
 		"/api/x/quotes?from=btc&from_network=Mainnet&to=xmr&to_network=Mainnet&amount=1e3",
 		"/api/x/quotes?from=btc&from_network=Mainnet&to=xmr&to_network=Mainnet&amount=0",
@@ -242,6 +242,57 @@ func TestPegasusTokensOnEthereum(t *testing.T) {
 		if a, ok := p.asset("USDC", network); !ok || a != (Asset{"usdc", "ERC20"}) {
 			t.Errorf("USDC on %s: %v %v", network, a, ok)
 		}
+	}
+}
+
+func TestExchangesListOutsideCoins(t *testing.T) {
+	x := newTestExchanges(newFakePegasus(t))
+	x.List = append(x.List, &ETZ{})
+	rec := xget(x, "/api/x/assets", "203.0.113.5")
+	var r struct {
+		Assets []struct {
+			Asset
+			Memo bool `json:"memo"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	listed := map[Asset]bool{}
+	for _, a := range r.Assets {
+		listed[a.Asset] = a.Memo
+	}
+	// Coins Biscuit holds first, then outside coins any exchange maps: XRP
+	// (ETZ only) needs a memo, ZEC is mapped by neither.
+	if len(r.Assets) < 7 || r.Assets[0].Asset != (Asset{"xmr", "Mainnet"}) || r.Assets[6].Asset != (Asset{"usdt", "TRC20"}) {
+		t.Errorf("order: %v", r.Assets)
+	}
+	if memo, ok := listed[Asset{"xrp", "Mainnet"}]; !ok || !memo {
+		t.Errorf("XRP: listed %v, memo %v", ok, memo)
+	}
+	if _, ok := listed[Asset{"sol", "Mainnet"}]; !ok {
+		t.Error("SOL not listed")
+	}
+	for _, a := range []Asset{{"zec", "Mainnet"}} {
+		if _, ok := listed[a]; ok {
+			t.Errorf("%v listed without an exchange", a)
+		}
+	}
+}
+
+func TestPegasusTokensOnTronAndSolana(t *testing.T) {
+	f := newFakePegasus(t)
+	x := newTestExchanges(f)
+	xget(x, "/api/x/quotes?from=xmr&from_network=Mainnet&to=usdt&to_network=TRC20&amount=1", "203.0.113.5")
+	if q := f.requests[0].URL.Query(); q.Get("coinTo") != "USDT" || q.Get("networkTo") != "TRX" {
+		t.Errorf("USDT on Tron query %v", q)
+	}
+	p := &Pegasus{}
+	if a, ok := p.asset("USDC", "SOL"); !ok || a != (Asset{"usdc", "SOL"}) {
+		t.Errorf("USDC on Solana: %v %v", a, ok)
+	}
+	if got := roundAmount("1.1234567891", Asset{"sol", "Mainnet"}, false); got != "1.123456789" {
+		t.Errorf("SOL decimals: %s", got)
 	}
 }
 

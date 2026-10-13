@@ -72,6 +72,9 @@ func serve(args []string) {
 	etzSecret := fs.String("etz-secret-file", "", "file holding the ETZ-Swap secret key")
 	etzKeyVersion := fs.String("etz-key-version", "1", "ETZ-Swap key version")
 	etzURL := fs.String("etz-url", "https://api.etz-swap.com/api/v1/deposit/public/", "ETZ-Swap API base URL")
+	stereoswapKey := fs.String("stereoswap-key-file", "", "file holding the Stereoswap API key (with -stereoswap-referral-file, enables Stereoswap)")
+	stereoswapReferral := fs.String("stereoswap-referral-file", "", "file holding the Stereoswap referral code, required to create swaps")
+	stereoswapURL := fs.String("stereoswap-url", "https://api.stereoswap.app/partner/v1/", "Stereoswap partner API base URL")
 	fs.Parse(args)
 
 	if (*domain == "") == (*dev == "") {
@@ -126,6 +129,14 @@ func serve(args []string) {
 			e.PublicKey, e.Secret = readSecret(*etzPublic), readSecret(*etzSecret)
 		}
 		exchangeList = append(exchangeList, e)
+	}
+	// Both or nothing: without the referral code its offers could not be taken.
+	if *stereoswapKey != "" || *stereoswapReferral != "" {
+		if *stereoswapKey == "" || *stereoswapReferral == "" {
+			log.Fatal("Stereoswap needs both -stereoswap-key-file and -stereoswap-referral-file")
+		}
+		exchangeList = append(exchangeList, &Stereoswap{BaseURL: *stereoswapURL, APIKey: readSecret(*stereoswapKey),
+			Referral: readSecret(*stereoswapReferral), Client: client})
 	}
 	var exchanges, onionExchanges http.Handler
 	if len(exchangeList) > 0 {

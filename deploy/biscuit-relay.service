@@ -14,6 +14,9 @@ ExecStart=/usr/local/bin/biscuit-relay serve \
     -key-file %d/trocador-key \
     -pegasus-public-key-file %d/pegasus-public-key \
     -pegasus-secret-file %d/pegasus-secret \
+    -etz \
+    -stereoswap-key-file %d/stereoswap-api-key \
+    -stereoswap-referral-file %d/stereoswap-referral \
     -recipient age1REPLACE_WITH_PUBLIC_KEY \
     -log-dir /var/lib/biscuit-relay/trades \
     -cert-dir /var/lib/biscuit-relay/certs
@@ -21,6 +24,8 @@ ExecStart=/usr/local/bin/biscuit-relay serve \
 LoadCredential=trocador-key:/etc/biscuit-relay/trocador-key
 LoadCredential=pegasus-public-key:/etc/biscuit-relay/pegasus-public-key
 LoadCredential=pegasus-secret:/etc/biscuit-relay/pegasus-secret
+LoadCredential=stereoswap-api-key:/etc/biscuit-relay/stereoswap-api-key
+LoadCredential=stereoswap-referral:/etc/biscuit-relay/stereoswap-referral
 Restart=always
 RestartSec=5
 
